@@ -11,6 +11,7 @@ from einops import rearrange, repeat
 from tqdm import tqdm
 from huggingface_hub import hf_hub_download
 import gradio as gr  # Import Gradio
+from diffusers import DiffusionPipeline, EulerAncestralDiscreteScheduler  # Importieren Sie DiffusionPipeline und EulerAncestralDiscreteScheduler
 
 from src.utils.train_util import instantiate_from_config
 from src.utils.camera_util import (
@@ -104,7 +105,6 @@ def generate_mvs(input_image, sample_steps, sample_seed):
     show_image = Image.fromarray(show_image.numpy())
 
     return z123_image, show_image
-
 
 def make_mesh(mesh_fpath, planes, export_texmap):
     mesh_basename = os.path.basename(mesh_fpath).split('.')[0]
