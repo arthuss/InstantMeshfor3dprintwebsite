@@ -36,6 +36,15 @@ else:
 model_cache_dir = './ckpts/'
 os.makedirs(model_cache_dir, exist_ok=True)
 
+# Laden der Konfigurationsdatei
+config_path = 'configs/instant-mesh-large.yaml'  # Passen Sie den Pfad zur Konfigurationsdatei an
+config = OmegaConf.load(config_path)
+config_name = os.path.basename(config_path).replace('.yaml', '')
+model_config = config.model_config
+infer_config = config.infer_config
+
+IS_FLEXICUBES = True if config_name.startswith('instant-mesh') else False
+
 # Initialisiere die Pipeline
 print('Loading diffusion model ...')
 pipeline = DiffusionPipeline.from_pretrained(
@@ -71,7 +80,6 @@ state_dict = torch.load(model_ckpt_path, map_location='cpu')['state_dict']
 state_dict = {k[14:]: v for k, v in state_dict.items() if k.startswith('lrm_generator.') and 'source_camera' not in k}
 model.load_state_dict(state_dict, strict=True)
 model = model.to(device1)
-IS_FLEXICUBES = True if config_name.startswith('instant-mesh') else False
 if IS_FLEXICUBES:
     model.init_flexicubes_geometry(device1, fovy=30.0)
 model = model.eval()
