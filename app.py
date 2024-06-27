@@ -24,12 +24,27 @@ from src.utils.infer_util import remove_background, resize_foreground, images_to
 
 import tempfile
 
+# Define the config files
+config_dir = 'configs'
+config_files = [f for f in os.listdir(config_dir) if f.endswith('.yaml')]
+
 if torch.cuda.is_available() and torch.cuda.device_count() >= 2:
     device0 = torch.device('cuda:0')
     device1 = torch.device('cuda:1')
 else:
     device0 = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     device1 = device0
+
+# Rest of your code...
+
+# In the Gradio interface setup:
+config_file = gr.Dropdown(
+    choices=config_files,
+    value=config_files[0] if config_files else None,  # Use the first config file as default, if available
+    label="Config File"
+)
+
+
 
 # Define the cache directory for model files
 model_cache_dir = './ckpts/'
