@@ -1,5 +1,4 @@
 import os
-import argparse
 import numpy as np
 import torch
 import rembg
@@ -7,7 +6,7 @@ from PIL import Image
 from torchvision.transforms import v2
 from pytorch_lightning import seed_everything
 from omegaconf import OmegaConf
-from einops import rearrange, repeat
+from einops import rearrange
 from tqdm import tqdm
 from huggingface_hub import hf_hub_download
 import gradio as gr
@@ -18,7 +17,7 @@ from src.utils.camera_util import (
     FOV_to_intrinsics,
     get_zero123plus_input_cameras,
     get_circular_camera_poses,
-    get_render_cameras  # Sicherstellen, dass dies importiert wird
+    get_render_cameras
 )
 from src.utils.mesh_util import save_obj, save_glb
 from src.utils.infer_util import remove_background, resize_foreground, images_to_video
@@ -35,30 +34,6 @@ else:
 # Define the cache directory for model files
 model_cache_dir = './ckpts/'
 os.makedirs(model_cache_dir, exist_ok=True)
-
-def get_render_cameras(batch_size=1, M=120, radius=2.5, elevation=10.0, is_flexicubes=False):
-    c2ws = get_circular_camera_poses(M=M, radius=radius, elevation=elevation)
-    if is_flexicubes:
-        cameras = torch.linalg.inv(c2ws)
-        cameras = cameras.unsqueeze(0).repeat(batch_size, 1, 1, 1)
-    else:
-        extrinsics = c2ws.flatten(-2)
-        intrinsics = FOV_to_intrinsics(30.0).unsqueeze(0).repeat(M, 1, 1).float().flatten(-2)
-        cameras = torch.cat([extrinsics, intrinsics], dim=-1)
-        cameras = cameras.unsqueeze(0).repeat(batch_size, 1, 1)
-    return cameras
-
-def images_to_video(images, output_path, fps=30):
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    frames = []
-    for i in range(images.shape[0]):
-        frame = (images[i].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8).clip(0, 255)
-        assert frame.shape[0] == images.shape[2] and frame.shape[1] == images.shape[3], \
-            f"Frame shape mismatch: {frame.shape} vs {images.shape}"
-        assert frame.min() >= 0 and frame.max() <= 255, \
-            f"Frame value out of range: {frame.min()} ~ {frame.max()}"
-        frames.append(frame)
-    imageio.mimwrite(output_path, np.stack(frames), fps=fps, codec='h264')
 
 # Configuration
 seed_everything(0)
@@ -85,6 +60,7 @@ pipeline.scheduler = EulerAncestralDiscreteScheduler.from_config(
 )
 
 # Load custom white-background UNet
+print('Loading custom white-background UNet ...')
 unet_ckpt_path = hf_hub_download(repo_id="TencentARC/InstantMesh", filename="diffusion_pytorch_model.bin", repo_type="model", cache_dir=model_cache_dir)
 state_dict = torch.load(unet_ckpt_path, map_location='cpu')
 pipeline.unet.load_state_dict(state_dict, strict=True)
