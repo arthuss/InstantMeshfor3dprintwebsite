@@ -151,6 +151,7 @@ def make3d(images, export_texmap, config_file):
     model_config = config.model_config
     infer_config = config.infer_config
     IS_FLEXICUBES = config.get('is_flexicubes', False)
+    SUPPORTS_CAMERAS = config.get('supports_cameras', False)  # Default to False if not specified
 
     images = np.asarray(images, dtype=np.float32) / 255.0
     images = torch.from_numpy(images).permute(2, 0, 1).contiguous().float()  # (3, 960, 640)
@@ -183,11 +184,19 @@ def make3d(images, export_texmap, config_file):
                     render_size=render_size,
                 )['img']
             else:
-                frame = model.synthesizer(
-                    planes,
-                    cameras=render_cameras[:, i:i+chunk_size],
-                    render_size=render_size,
-                )['images_rgb']
+                if SUPPORTS_CAMERAS:
+                    frame = model.synthesizer(
+                        planes,
+                        cameras=render_cameras[:, i:i+chunk_size],
+                        render_size=render_size,
+                    )['images_rgb']
+                else:
+                    # If cameras are not supported or not specified, don't use the cameras argument
+                    frame = model.synthesizer(
+                        planes,
+                        render_cameras[:, i:i+chunk_size],
+                        render_size=render_size,
+                    )['images_rgb']
             frames.append(frame)
         frames = torch.cat(frames, dim=1)
 
@@ -198,6 +207,10 @@ def make3d(images, export_texmap, config_file):
         )
 
         print(f"Video saved to {video_fpath}")
+
+    mesh_fpath, mesh_glb_fpath = make_mesh(mesh_fpath, planes, export_texmap)
+
+    return video_fpath, mesh_fpath, mesh_glb_fpath
 
     mesh_fpath, mesh_glb_fpath = make_mesh(mesh_fpath, planes, export_texmap)
 
