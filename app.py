@@ -35,6 +35,48 @@ else:
 model_cache_dir = './ckpts/'
 os.makedirs(model_cache_dir, exist_ok=True)
 
+# Initialisiere die Pipeline
+print('Loading diffusion model ...')
+pipeline = DiffusionPipeline.from_pretrained(
+    "sudo-ai/zero123plus-v1.2", 
+    custom_pipeline="zero123plus",
+    torch_dtype=torch.float16,
+    cache_dir=model_cache_dir
+)
+pipeline.scheduler = EulerAncestralDiscreteScheduler.from_config(
+    pipeline.scheduler.config, timestep_spacing='trailing'
+)
+
+print('Loading custom white-background UNet ...')
+unet_ckpt_path = hf_hub_download(
+    repo_id="TencentARC/InstantMesh", 
+    filename="diffusion_pytorch_model.bin", 
+    repo_type="model", 
+    cache_dir=model_cache_dir
+)
+state_dict = torch.load(unet_ckpt_path, map_location='cpu')
+pipeline.unet.load_state_dict(state_dict, strict=True)
+pipeline = pipeline.to(device0)
+
+print('Loading reconstruction model ...')
+model_ckpt_path = hf_hub_download(
+    repo_id="TencentARC/InstantMesh", 
+    filename="instant_mesh_large.ckpt", 
+    repo_type="model", 
+    cache_dir=model_cache_dir
+)
+model = instantiate_from_config(model_config)
+state_dict = torch.load(model_ckpt_path, map_location='cpu')['state_dict']
+state_dict = {k[14:]: v for k, v in state_dict.items() if k.startswith('lrm_generator.') and 'source_camera' not in k}
+model.load_state_dict(state_dict, strict=True)
+model = model.to(device1)
+IS_FLEXICUBES = True if config_name.startswith('instant-mesh') else False
+if IS_FLEXICUBES:
+    model.init_flexicubes_geometry(device1, fovy=30.0)
+model = model.eval()
+
+print('Loading Finished!')
+
 def check_input_image(input_image):
     if input_image is None:
         raise gr.Error("No image uploaded!")
@@ -62,6 +104,7 @@ def generate_mvs(input_image, sample_steps, sample_seed):
     show_image = Image.fromarray(show_image.numpy())
 
     return z123_image, show_image
+
 
 def make_mesh(mesh_fpath, planes, export_texmap):
     mesh_basename = os.path.basename(mesh_fpath).split('.')[0]
