@@ -10,20 +10,20 @@ from omegaconf import OmegaConf
 from einops import rearrange, repeat
 from tqdm import tqdm
 from huggingface_hub import hf_hub_download
-import gradio as gr  # Import Gradio
-from diffusers import DiffusionPipeline, EulerAncestralDiscreteScheduler  # Importieren Sie DiffusionPipeline und EulerAncestralDiscreteScheduler
+import gradio as gr
+from diffusers import DiffusionPipeline, EulerAncestralDiscreteScheduler
 
 from src.utils.train_util import instantiate_from_config
 from src.utils.camera_util import (
     FOV_to_intrinsics,
     get_zero123plus_input_cameras,
     get_circular_camera_poses,
+    get_render_cameras  # Sicherstellen, dass dies importiert wird
 )
 from src.utils.mesh_util import save_obj, save_glb
 from src.utils.infer_util import remove_background, resize_foreground, images_to_video
 
-# Erstellen Sie eine Liste mit allen verfügbaren YAML-Konfigurationsdateien im configs-Verzeichnis
-config_files = [f for f in os.listdir('configs') if f.endswith('.yaml')]
+import tempfile
 
 if torch.cuda.is_available() and torch.cuda.device_count() >= 2:
     device0 = torch.device('cuda:0')
@@ -36,16 +36,43 @@ else:
 model_cache_dir = './ckpts/'
 os.makedirs(model_cache_dir, exist_ok=True)
 
-# Laden der Konfigurationsdatei
-config_path = 'configs/instant-mesh-large.yaml'  # Passen Sie den Pfad zur Konfigurationsdatei an
+def get_render_cameras(batch_size=1, M=120, radius=2.5, elevation=10.0, is_flexicubes=False):
+    c2ws = get_circular_camera_poses(M=M, radius=radius, elevation=elevation)
+    if is_flexicubes:
+        cameras = torch.linalg.inv(c2ws)
+        cameras = cameras.unsqueeze(0).repeat(batch_size, 1, 1, 1)
+    else:
+        extrinsics = c2ws.flatten(-2)
+        intrinsics = FOV_to_intrinsics(30.0).unsqueeze(0).repeat(M, 1, 1).float().flatten(-2)
+        cameras = torch.cat([extrinsics, intrinsics], dim=-1)
+        cameras = cameras.unsqueeze(0).repeat(batch_size, 1, 1)
+    return cameras
+
+def images_to_video(images, output_path, fps=30):
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    frames = []
+    for i in range(images.shape[0]):
+        frame = (images[i].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8).clip(0, 255)
+        assert frame.shape[0] == images.shape[2] and frame.shape[1] == images.shape[3], \
+            f"Frame shape mismatch: {frame.shape} vs {images.shape}"
+        assert frame.min() >= 0 and frame.max() <= 255, \
+            f"Frame value out of range: {frame.min()} ~ {frame.max()}"
+        frames.append(frame)
+    imageio.mimwrite(output_path, np.stack(frames), fps=fps, codec='h264')
+
+# Configuration
+seed_everything(0)
+
+config_path = 'configs/instant-mesh-large.yaml'
 config = OmegaConf.load(config_path)
 config_name = os.path.basename(config_path).replace('.yaml', '')
 model_config = config.model_config
 infer_config = config.infer_config
 
 IS_FLEXICUBES = True if config_name.startswith('instant-mesh') else False
+device = torch.device('cuda')
 
-# Initialisiere die Pipeline
+# Load diffusion model
 print('Loading diffusion model ...')
 pipeline = DiffusionPipeline.from_pretrained(
     "sudo-ai/zero123plus-v1.2", 
@@ -57,24 +84,15 @@ pipeline.scheduler = EulerAncestralDiscreteScheduler.from_config(
     pipeline.scheduler.config, timestep_spacing='trailing'
 )
 
-print('Loading custom white-background UNet ...')
-unet_ckpt_path = hf_hub_download(
-    repo_id="TencentARC/InstantMesh", 
-    filename="diffusion_pytorch_model.bin", 
-    repo_type="model", 
-    cache_dir=model_cache_dir
-)
+# Load custom white-background UNet
+unet_ckpt_path = hf_hub_download(repo_id="TencentARC/InstantMesh", filename="diffusion_pytorch_model.bin", repo_type="model", cache_dir=model_cache_dir)
 state_dict = torch.load(unet_ckpt_path, map_location='cpu')
 pipeline.unet.load_state_dict(state_dict, strict=True)
 pipeline = pipeline.to(device0)
 
+# Load reconstruction model
 print('Loading reconstruction model ...')
-model_ckpt_path = hf_hub_download(
-    repo_id="TencentARC/InstantMesh", 
-    filename="instant_mesh_large.ckpt", 
-    repo_type="model", 
-    cache_dir=model_cache_dir
-)
+model_ckpt_path = hf_hub_download(repo_id="TencentARC/InstantMesh", filename="instant_mesh_large.ckpt", repo_type="model", cache_dir=model_cache_dir)
 model = instantiate_from_config(model_config)
 state_dict = torch.load(model_ckpt_path, map_location='cpu')['state_dict']
 state_dict = {k[14:]: v for k, v in state_dict.items() if k.startswith('lrm_generator.') and 'source_camera' not in k}
