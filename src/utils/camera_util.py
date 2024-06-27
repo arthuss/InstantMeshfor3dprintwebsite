@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 
+
 def pad_camera_extrinsics_4x4(extrinsics):
     if extrinsics.shape[-2] == 4:
         return extrinsics
@@ -10,6 +11,7 @@ def pad_camera_extrinsics_4x4(extrinsics):
         padding = padding.unsqueeze(0).repeat(extrinsics.shape[0], 1, 1)
     extrinsics = torch.cat([extrinsics, padding], dim=-2)
     return extrinsics
+
 
 def center_looking_at_camera_pose(camera_position: torch.Tensor, look_at: torch.Tensor = None, up_world: torch.Tensor = None):
     """
@@ -41,6 +43,7 @@ def center_looking_at_camera_pose(camera_position: torch.Tensor, look_at: torch.
     extrinsics = pad_camera_extrinsics_4x4(extrinsics)
     return extrinsics
 
+
 def spherical_camera_pose(azimuths: np.ndarray, elevations: np.ndarray, radius=2.5):
     azimuths = np.deg2rad(azimuths)
     elevations = np.deg2rad(elevations)
@@ -54,6 +57,7 @@ def spherical_camera_pose(azimuths: np.ndarray, elevations: np.ndarray, radius=2
 
     c2ws = center_looking_at_camera_pose(cam_locations)
     return c2ws
+
 
 def get_circular_camera_poses(M=120, radius=2.5, elevation=30.0):
     # M: number of circular views
@@ -76,6 +80,7 @@ def get_circular_camera_poses(M=120, radius=2.5, elevation=30.0):
     extrinsics = center_looking_at_camera_pose(camera_positions)
     return extrinsics
 
+
 def FOV_to_intrinsics(fov, device='cpu'):
     """
     Creates a 3x3 camera intrinsics matrix from the camera field of view, specified in degrees.
@@ -85,6 +90,7 @@ def FOV_to_intrinsics(fov, device='cpu'):
     focal_length = 0.5 / np.tan(np.deg2rad(fov) * 0.5)
     intrinsics = torch.tensor([[focal_length, 0, 0.5], [0, focal_length, 0.5], [0, 0, 1]], device=device)
     return intrinsics
+
 
 def get_zero123plus_input_cameras(batch_size=1, radius=4.0, fov=30.0):
     """
@@ -103,15 +109,3 @@ def get_zero123plus_input_cameras(batch_size=1, radius=4.0, fov=30.0):
     cameras = torch.cat([extrinsics, intrinsics], dim=-1)
 
     return cameras.unsqueeze(0).repeat(batch_size, 1, 1)
-
-def get_render_cameras(batch_size=1, M=120, radius=4.0, elevation=20.0, is_flexicubes=False):
-    c2ws = get_circular_camera_poses(M=M, radius=radius, elevation=elevation)
-    if is_flexicubes:
-        cameras = torch.linalg.inv(c2ws)
-        cameras = cameras.unsqueeze(0).repeat(batch_size, 1, 1, 1)
-    else:
-        extrinsics = c2ws.flatten(-2)
-        intrinsics = FOV_to_intrinsics(30.0).unsqueeze(0).repeat(M, 1, 1).float().flatten(-2)
-        cameras = torch.cat([extrinsics, intrinsics], dim=-1)
-        cameras = cameras.unsqueeze(0).repeat(batch_size, 1, 1)
-    return cameras
