@@ -151,7 +151,6 @@ if __name__ == '__main__':
                     input_image = gr.Image(
                         label="Input Image",
                         image_mode="RGBA",
-                        sources="upload",
                         width=256,
                         height=256,
                         type="pil",
